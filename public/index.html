@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gestión de Reservas y Salas · CRUD API</title>
+  <link rel="stylesheet" href="/estilos.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-content">
+      <div class="header-brand">
+        <h1>Sistema de Gestión de Reservas</h1>
+        <p class="subtitle">API REST (Express + MariaDB) &middot; Tiempo Real (Socket.IO)</p>
+      </div>
+      <div class="header-status">
+        <span class="status-indicator" id="estadoConexion">
+          <span class="dot"></span> <span id="textoConexion">Conectando...</span>
+        </span>
+      </div>
+    </div>
+  </header>
+
+  <div class="container main-layout">
+    <div class="content-area">
+      <!-- Navegación por pestañas -->
+      <nav class="tabs-nav">
+        <button type="button" class="tab-btn active" data-tab="tab-reservas">📅 Reservas</button>
+        <button type="button" class="tab-btn" data-tab="tab-salas">🏢 Salas</button>
+      </nav>
+
+      <!-- Mensajes de alerta globales -->
+      <div id="alertContainer"></div>
+
+      <!-- ================= PESTAÑA RESERVAS ================= -->
+      <section id="tab-reservas" class="tab-content active">
+        <div class="section-toolbar">
+          <div class="toolbar-actions">
+            <button type="button" class="btn btn-primary" id="btnNuevaReserva">➕ Nueva Reserva</button>
+            <a href="/api/reservas/exportar" class="btn btn-secondary" id="btnExportarCsv" download>📥 Exportar CSV</a>
+            <button type="button" class="btn btn-secondary" id="btnImportarCsv">📤 Importar CSV</button>
+          </div>
+          <div class="toolbar-filters">
+            <select id="filtroSala" class="form-control">
+              <option value="">Todas las salas</option>
+            </select>
+            <select id="filtroEstado" class="form-control">
+              <option value="">Todos los estados</option>
+              <option value="confirmada">Confirmadas</option>
+              <option value="cancelada">Canceladas</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-outline" id="btnLimpiarFiltros">Limpiar</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Sala</th>
+                <th>Responsable</th>
+                <th>Motivo</th>
+                <th>Horario (Inicio &rarr; Fin)</th>
+                <th>Asist.</th>
+                <th>Estado</th>
+                <th>Ver.</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaReservas">
+              <tr><td colspan="9" class="text-center">Cargando reservas...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ================= PESTAÑA SALAS ================= -->
+      <section id="tab-salas" class="tab-content">
+        <div class="section-toolbar">
+          <div class="toolbar-actions">
+            <button type="button" class="btn btn-primary" id="btnNuevaSala">➕ Nueva Sala</button>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Nombre</th>
+                <th>Capacidad</th>
+                <th>Ubicación</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tablaSalas">
+              <tr><td colspan="5" class="text-center">Cargando salas...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- Panel Lateral: Eventos en Tiempo Real -->
+    <aside class="sidebar-events">
+      <div class="events-header">
+        <h3>⚡ Eventos en Vivo</h3>
+        <button type="button" class="btn-clear" id="btnLimpiarEventos" title="Limpiar lista">&times;</button>
+      </div>
+      <p class="events-hint">Cambios recibidos en tiempo real por WebSocket (Socket.IO):</p>
+      <ul id="listaEventos" class="events-list"></ul>
+    </aside>
+  </div>
+
+  <!-- ================= MODAL RESERVA ================= -->
+  <div id="modalReserva" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalReservaTitulo">Nueva Reserva</h3>
+        <button type="button" class="modal-close" data-close="modalReserva">&times;</button>
+      </div>
+      <form id="formReserva">
+        <input type="hidden" id="reservaId" />
+        <input type="hidden" id="reservaVersion" />
+
+        <div class="modal-body">
+          <div id="modalReservaError" class="modal-alert hidden"></div>
+
+          <div class="form-group">
+            <label for="reservaSalaId">Sala <span class="req">*</span></label>
+            <select id="reservaSalaId" class="form-control" required>
+              <option value="">Seleccione una sala...</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="reservaResponsable">Responsable <span class="req">*</span></label>
+            <input type="text" id="reservaResponsable" class="form-control" placeholder="Ej. Ana Pérez" required minlength="3" maxlength="100" />
+          </div>
+
+          <div class="form-group">
+            <label for="reservaMotivo">Motivo de la reunión</label>
+            <input type="text" id="reservaMotivo" class="form-control" placeholder="Ej. Planificación de proyecto" maxlength="255" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="reservaInicio">Fecha y Hora Inicio <span class="req">*</span></label>
+              <input type="datetime-local" id="reservaInicio" class="form-control" required />
+            </div>
+            <div class="form-group">
+              <label for="reservaFin">Fecha y Hora Fin <span class="req">*</span></label>
+              <input type="datetime-local" id="reservaFin" class="form-control" required />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="reservaAsistentes">N° Asistentes <span class="req">*</span></label>
+              <input type="number" id="reservaAsistentes" class="form-control" min="1" max="1000" value="1" required />
+            </div>
+            <div class="form-group" id="grupoEstadoEdicion" style="display: none;">
+              <label for="reservaEstado">Estado</label>
+              <select id="reservaEstado" class="form-control">
+                <option value="confirmada">Confirmada</option>
+                <option value="cancelada">Cancelada</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="modalReserva">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnGuardarReserva">Guardar Reserva</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL SALA ================= -->
+  <div id="modalSala" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modalSalaTitulo">Nueva Sala</h3>
+        <button type="button" class="modal-close" data-close="modalSala">&times;</button>
+      </div>
+      <form id="formSala">
+        <input type="hidden" id="salaId" />
+
+        <div class="modal-body">
+          <div id="modalSalaError" class="modal-alert hidden"></div>
+
+          <div class="form-group">
+            <label for="salaNombre">Nombre de la Sala <span class="req">*</span></label>
+            <input type="text" id="salaNombre" class="form-control" placeholder="Ej. Sala Creativa" required minlength="2" maxlength="100" />
+          </div>
+
+          <div class="form-group">
+            <label for="salaCapacidad">Capacidad máxima (personas) <span class="req">*</span></label>
+            <input type="number" id="salaCapacidad" class="form-control" min="1" max="1000" placeholder="Ej. 20" required />
+          </div>
+
+          <div class="form-group">
+            <label for="salaUbicacion">Ubicación</label>
+            <input type="text" id="salaUbicacion" class="form-control" placeholder="Ej. Bloque B - Piso 2" maxlength="150" />
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="modalSala">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btnGuardarSala">Guardar Sala</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ================= MODAL IMPORTAR CSV ================= -->
+  <div id="modalImportar" class="modal-backdrop hidden">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>Importar Reservas desde Archivo CSV</h3>
+        <button type="button" class="modal-close" data-close="modalImportar">&times;</button>
+      </div>
+      <form id="formImportar">
+        <div class="modal-body">
+          <p class="modal-desc">
+            Seleccione un archivo <code>.csv</code> con encabezados:
+            <br />
+            <code>salaId,responsable,motivo,inicio,fin,asistentes</code>
+          </p>
+
+          <div id="modalImportarError" class="modal-alert hidden"></div>
+
+          <div class="form-group">
+            <label for="archivoCsv">Archivo CSV <span class="req">*</span></label>
+            <input type="file" id="archivoCsv" class="form-control" accept=".csv" required />
+          </div>
+
+          <div id="resultadoImportacion" class="import-results hidden"></div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-close="modalImportar">Cerrar</button>
+          <button type="submit" class="btn btn-primary" id="btnSubirCsv">Subir e Importar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
